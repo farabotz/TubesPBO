@@ -1,0 +1,340 @@
+PENJELASAN APLIKASI “CLASSMATE” (TubesPBO)
+=========================================
+
+0) Intinya aplikasi ini buat apa?
+-------------------------------
+CLASSMATE adalah aplikasi web untuk “peminjaman ruangan/kelas”.
+Pengguna bisa:
+- Mahasiswa: lihat daftar ruangan, ajukan peminjaman (booking), lihat status, batalkan pengajuan tertentu.
+- Admin: kelola ruangan, kelola user, approve/reject pengajuan booking, lihat laporan.
+
+Aplikasi ini berjalan di Tomcat (web server Java) dan tersambung ke database MySQL.
+
+
+1) Gambaran cara kerja web-nya (versi awam)
+------------------------------------------
+Bayangkan aplikasi ini seperti kantor layanan:
+- Browser = orang yang datang membawa formulir.
+- Servlet (Java) = petugas loket yang menerima permintaan.
+- JSP = “kertas tampilan” yang dicetak untuk ditunjukkan ke pengguna.
+- DAO/Service = staf belakang yang ambil data dan menjalankan aturan.
+- Database = lemari arsip.
+
+Saat user membuka URL:
+1) Tomcat mencari Servlet yang menangani URL tersebut.
+2) Servlet memeriksa apakah user sudah login (cek session).
+3) Servlet mengambil/menyimpan data lewat DAO/Service.
+4) Servlet mengirim user ke halaman JSP (forward) atau pindah URL (redirect).
+
+
+2) Struktur folder penting (yang perlu dipahami)
+-----------------------------------------------
+- src/main/java/com/tubespbo/classmate/controller
+  Berisi Servlet (controller). Ini yang “mengatur alur” tiap halaman.
+
+- src/main/java/com/tubespbo/classmate/model
+  Berisi kelas data: User, Room, Booking, Notification, serta enum Role/Status.
+
+- src/main/java/com/tubespbo/classmate/dao
+  Berisi kelas akses database (query SQL): UserDao, RoomDao, BookingDao, NotificationDao.
+
+- src/main/java/com/tubespbo/classmate/service
+  Berisi aturan bisnis: AuthService (login/register), BookingService (validasi booking),
+  ApprovalService (approve/reject/cancel), NotificationService (buat notifikasi).
+
+- src/main/webapp/WEB-INF/jsp
+  Berisi halaman JSP (tampilan). User tidak mengakses JSP langsung.
+  User akses URL servlet, lalu servlet “forward” ke JSP.
+
+- db/classmate.sql
+  Skema tabel database + data awal (seed), misalnya akun admin default.
+
+
+3) Modul Autentikasi: Login, Register, Logout
+---------------------------------------------
+3.1 Session (ingat status login)
+- Saat login sukses, data user disimpan ke session dengan key "user".
+- Kalau session tidak punya "user", berarti belum login.
+
+3.2 Register (buat akun)
+- User mengisi form register.
+- Password tidak disimpan mentah, tapi di-hash (dibuat menjadi kode acak yang aman).
+- Data user disimpan ke tabel users.
+- Setelah sukses, user biasanya diminta login.
+
+3.3 Login (masuk ke sistem)
+- User memasukkan email dan password.
+- Sistem cek ke database apakah email ada.
+- Password yang dimasukkan dibandingkan dengan hash yang tersimpan.
+- Jika cocok, session diisi (user dianggap login) lalu diarahkan ke dashboard.
+
+3.4 Logout
+- Session dihapus (atau atribut user dihapus), lalu user balik ke halaman login.
+
+
+4) Modul Role/Autorization: Admin vs Mahasiswa
+----------------------------------------------
+Aplikasi membedakan akses berdasarkan role:
+- ADMIN: boleh akses /admin/* (rooms, users, bookings approval, report)
+- MAHASISWA: fokus ke rooms, booking, my-bookings
+
+Mekanisme umumnya:
+- Jika tidak login: redirect ke /login
+- Jika role tidak sesuai: server mengembalikan 403 (forbidden)
+
+
+5) Modul Ruangan (Rooms)
+-----------------------
+5.1 Mahasiswa melihat ruangan
+- Halaman daftar ruangan menampilkan room yang tersedia.
+- Dari sini mahasiswa bisa klik “Pinjam” untuk membuka form booking.
+
+5.2 Admin kelola ruangan
+- Admin bisa menambah ruangan (nama, kapasitas, lokasi).
+- Admin melihat tabel ruangan (bisa sorting).
+
+Data ruangan disimpan di tabel rooms.
+
+
+6) Modul Peminjaman (Booking)
+-----------------------------
+6.1 Membuat booking (pengajuan)
+Alur mahasiswa:
+1) Pilih ruangan.
+2) Isi tanggal, jam mulai, jam selesai, dan catatan/alasan jika ada.
+3) Klik submit.
+
+Sistem menjalankan validasi (aturan dasar), misalnya:
+- jam mulai harus sebelum jam selesai
+- durasi minimal (misal 15 menit)
+- tidak boleh lintas hari (mulai dan selesai harus di tanggal yang sama)
+- (biasanya) tidak boleh bentrok dengan booking lain
+
+Jika lolos, booking dibuat dengan status PENDING.
+
+6.2 Melihat booking milik sendiri
+- Mahasiswa dapat melihat riwayat booking di halaman “My Bookings”.
+- Dari sini bisa lihat status: PENDING / APPROVED / REJECTED / CANCELLED.
+
+6.3 Cancel booking (oleh mahasiswa)
+- Biasanya hanya boleh cancel jika masih PENDING.
+- Sistem akan mengubah status menjadi CANCELLED.
+
+Data booking disimpan di tabel bookings.
+
+
+7) Modul Approval (Admin approve/reject)
+----------------------------------------
+Alur admin:
+1) Buka halaman admin bookings.
+2) Lihat daftar booking yang statusnya PENDING.
+3) Admin memilih:
+   - Approve: booking jadi APPROVED
+   - Reject: booking jadi REJECTED (biasanya bisa isi alasan)
+
+Perubahan status ini biasanya juga memicu notifikasi.
+
+
+8) Modul Notifikasi
+-------------------
+Notifikasi digunakan agar user tahu ada perubahan penting, misalnya:
+- Booking kamu di-approve
+- Booking kamu di-reject (dengan alasan)
+- (opsional) notifikasi ke admin lain
+
+Notifikasi disimpan di tabel notifications dan ditampilkan di dashboard.
+
+8.1 Notifikasi untuk Admin saat ada pengajuan baru
+-------------------------------------------------
+Tujuan: ketika Mahasiswa mengajukan peminjaman (status PENDING), Admin langsung dapat "alarm" di Dashboard.
+
+Alur sederhananya:
+1) Mahasiswa isi form peminjaman dan klik Submit.
+2) Sistem membuat record booking baru dengan status PENDING di tabel bookings.
+3) Sistem membuat notifikasi untuk semua Admin di tabel notifications.
+4) Admin membuka Dashboard → bagian "🔔 Notifikasi" menampilkan pesan pengajuan baru.
+
+Dengan notifikasi ini, Admin tahu ada pengajuan masuk, lalu bisa lanjut ke menu "✅ Approval" untuk approve/reject.
+
+8.2 Notifikasi itu muncul di halaman mana?
+----------------------------------------
+- Notifikasi ditampilkan di /dashboard.
+- Dashboard mengambil data notifikasi berdasarkan user yang sedang login.
+  Artinya:
+  - Jika login sebagai Admin, yang ditampilkan adalah notifikasi milik Admin.
+  - Jika login sebagai Mahasiswa, yang ditampilkan adalah notifikasi milik Mahasiswa.
+
+
+9) Modul Laporan (Report)
+-------------------------
+Admin dapat melihat/mengambil laporan peminjaman berdasarkan rentang tanggal.
+Biasanya output berupa tampilan daftar atau file (CSV/PDF) tergantung implementasi.
+
+
+9.1 Modul Kelola User (Admin Users)
+----------------------------------
+Halaman /admin/users menampilkan daftar user (Mahasiswa dan Admin).
+
+Fitur utama:
+- Melihat daftar user.
+- Menghapus user lain (misalnya akun mahasiswa yang tidak diperlukan).
+- Menambah admin baru.
+
+Catatan penting keamanan:
+- Admin tidak boleh menghapus akun admin yang sedang dipakai login (akun sendiri).
+  Biasanya tombol hapus untuk akun sendiri tidak ditampilkan, dan server juga menolak kalau dipaksa.
+
+UX (tampilan):
+- Bagian "Tambah Admin" berupa tombol kecil.
+- Form tambah admin baru muncul setelah tombol itu diklik.
+
+
+10) Database: tabel yang paling penting
+--------------------------------------
+- users: data akun (nama, email, password_hash, role, nim)
+- rooms: data ruangan (nama, kapasitas, lokasi, tersedia)
+- bookings: data peminjaman (user_id, room_id, waktu_mulai, waktu_selesai, status, alasan)
+- notifications: data notifikasi (user_id, channel, message, created_at, read_at)
+
+
+11) URL yang sering dipakai (gambaran)
+-------------------------------------
+- /login : halaman login
+- /register : halaman register
+- /logout : keluar
+- /dashboard : dashboard
+- /rooms : daftar ruangan
+- /book : form membuat booking
+- /my-bookings : daftar booking milik user
+
+Admin:
+- /admin/rooms : kelola ruangan
+- /admin/users : kelola user
+- /admin/bookings : approval
+- /admin/report : laporan
+
+
+12) Kalau ada error halaman admin (catatan runtime Tomcat)
+--------------------------------------------------------
+Halaman JSP dikompilasi oleh Tomcat saat pertama kali dibuka.
+Kalau sebelumnya ada error, kadang Tomcat menyimpan hasil kompilasi di folder “work”.
+Jika sudah memperbaiki JSP tapi error masih muncul:
+- Restart Tomcat
+- Atau bersihkan folder work/Catalina/localhost/TubesPBO (lokasi tergantung instalasi Tomcat)
+
+12.1 Catatan penting soal "perubahan kode belum kebaca"
+------------------------------------------------------
+Di setup ini, Tomcat bisa menjalankan aplikasi dari folder hasil build (target/TubesPBO), bukan langsung dari src.
+Artinya:
+- Mengubah file di src/main/java belum tentu langsung kebaca saat aplikasi jalan.
+- Biasanya perlu proses build/compile dulu supaya class terbaru masuk ke folder target/TubesPBO/WEB-INF/classes.
+
+12.2 Jika notifikasi Admin tidak muncul (troubleshooting cepat)
+-------------------------------------------------------------
+Jika Mahasiswa sudah submit booking tapi Admin masih melihat "Belum ada notifikasi":
+1) Pastikan booking benar-benar berhasil dibuat (cek halaman My Bookings, status PENDING).
+2) Cek tabel notifications di database:
+  - Harus ada baris baru untuk user_id admin.
+3) Pastikan akun Admin benar-benar role ADMIN (kolom peran di tabel users).
+4) Restart Tomcat, dan bersihkan cache folder work/Catalina/localhost/TubesPBO.
+
+
+13) Daftar File yang Terlibat (JSP, Servlet, Java)
+-------------------------------------------------
+
+13.1 Autentikasi (Login / Register / Logout / Session)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/LoginServlet.java
+  - src/main/java/com/tubespbo/classmate/controller/RegisterServlet.java
+  - src/main/java/com/tubespbo/classmate/controller/LogoutServlet.java
+  - src/main/java/com/tubespbo/classmate/controller/BaseServlet.java
+- Service/DAO/Util:
+  - src/main/java/com/tubespbo/classmate/service/AuthService.java
+  - src/main/java/com/tubespbo/classmate/dao/UserDao.java
+  - src/main/java/com/tubespbo/classmate/util/PasswordUtil.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/login.jsp
+  - src/main/webapp/WEB-INF/jsp/register.jsp
+
+13.2 Dashboard & Notifikasi
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/DashboardServlet.java
+- DAO/Service:
+  - src/main/java/com/tubespbo/classmate/dao/NotificationDao.java
+  - src/main/java/com/tubespbo/classmate/service/NotificationService.java
+- Model:
+  - src/main/java/com/tubespbo/classmate/model/Notification.java
+  - src/main/java/com/tubespbo/classmate/model/NotificationChannel.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/dashboard.jsp
+
+13.3 Ruangan (Mahasiswa lihat, Admin kelola)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/RoomsServlet.java
+  - src/main/java/com/tubespbo/classmate/controller/AdminRoomsServlet.java
+- DAO/Model:
+  - src/main/java/com/tubespbo/classmate/dao/RoomDao.java
+  - src/main/java/com/tubespbo/classmate/model/Room.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/rooms.jsp
+  - src/main/webapp/WEB-INF/jsp/admin_rooms.jsp
+
+13.4 Peminjaman (Booking: buat pengajuan, riwayat, cancel)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/BookingCreateServlet.java
+  - src/main/java/com/tubespbo/classmate/controller/MyBookingsServlet.java
+- Service/DAO:
+  - src/main/java/com/tubespbo/classmate/service/BookingService.java
+  - src/main/java/com/tubespbo/classmate/service/ApprovalService.java
+  - src/main/java/com/tubespbo/classmate/dao/BookingDao.java
+  - src/main/java/com/tubespbo/classmate/dao/RoomDao.java
+- Model:
+  - src/main/java/com/tubespbo/classmate/model/Booking.java
+  - src/main/java/com/tubespbo/classmate/model/BookingStatus.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/booking_form.jsp
+  - src/main/webapp/WEB-INF/jsp/my_bookings.jsp
+
+13.5 Approval (Admin approve/reject booking)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/AdminBookingsServlet.java
+- Service/DAO:
+  - src/main/java/com/tubespbo/classmate/service/ApprovalService.java
+  - src/main/java/com/tubespbo/classmate/dao/BookingDao.java
+  - src/main/java/com/tubespbo/classmate/service/NotificationService.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/admin_bookings.jsp
+
+13.6 Admin Users (tambah admin, hapus user lain)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/AdminUsersServlet.java
+- DAO/Model/Util:
+  - src/main/java/com/tubespbo/classmate/dao/UserDao.java
+  - src/main/java/com/tubespbo/classmate/model/User.java
+  - src/main/java/com/tubespbo/classmate/model/Role.java
+  - src/main/java/com/tubespbo/classmate/util/PasswordUtil.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/admin_users.jsp
+
+13.7 Laporan (Report)
+- Servlet/Controller:
+  - src/main/java/com/tubespbo/classmate/controller/ReportServlet.java
+- DAO:
+  - src/main/java/com/tubespbo/classmate/dao/BookingDao.java
+- JSP:
+  - src/main/webapp/WEB-INF/jsp/report.jsp
+
+13.8 Konfigurasi, Database, dan Asset UI
+- Database:
+  - db/classmate.sql
+- Koneksi database:
+  - src/main/resources/db.properties
+  - src/main/java/com/tubespbo/classmate/util/Db.java
+- Web config:
+  - src/main/webapp/WEB-INF/web.xml
+  - src/main/webapp/META-INF/context.xml
+- Asset UI:
+  - src/main/webapp/assets/app.css
+  - src/main/webapp/index.html
+
+Selesai.
